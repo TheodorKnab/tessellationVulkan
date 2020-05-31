@@ -1,4 +1,4 @@
-
+//based on https://vulkan-tutorial.com
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -19,6 +19,7 @@
 #include <array>
 #include <optional>
 #include <set>
+#include <sstream>
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -27,6 +28,9 @@ const int MAX_FRAMES_IN_FLIGHT = 2;
 
 bool _wireframe = false;
 bool _changed = false;
+std::chrono::steady_clock::time_point lastTime;
+int frames = 0;
+
 float tessLevelOuter = 3.0f;
 float tessLevelInner = 3.0f;
 const std::vector<const char*> validationLayers = {
@@ -135,32 +139,32 @@ const std::vector<uint16_t> indices = {
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
-    switch (key)
-    {
-    case GLFW_KEY_SPACE:
-        if (action == GLFW_PRESS) {
+    if (action == GLFW_PRESS) {
+        switch (key)
+        {
+        case GLFW_KEY_SPACE:
             _wireframe = !_wireframe;
             _changed = true;
-        }
-        break;
-    case GLFW_KEY_S:
-        if (tessLevelInner > 1) {
-            tessLevelInner -= 5;
-        }
-        break;
-    case GLFW_KEY_W:
-        if (tessLevelInner < 100) {
-            tessLevelInner += 5;
-        }
-        break;
-    case GLFW_KEY_D:
-        if (tessLevelOuter > 1) {
-            tessLevelOuter -= 5;
-        }
-        break;
-    case GLFW_KEY_E:
-        if (tessLevelOuter < 100) {
-            tessLevelOuter += 5;
+            break;
+        case GLFW_KEY_S:
+            if (tessLevelInner > 1) {
+                tessLevelInner -= 1;
+            }
+            break;
+        case GLFW_KEY_W:
+            if (tessLevelInner < 1000) {
+                tessLevelInner += 1;
+            }
+            break;
+        case GLFW_KEY_D:
+            if (tessLevelOuter > 1) {
+                tessLevelOuter -= 1;
+            }
+            break;
+        case GLFW_KEY_E:
+            if (tessLevelOuter < 1000) {
+                tessLevelOuter += 1;
+            }
         }
     }
 }
@@ -196,7 +200,8 @@ private:
 
     VkRenderPass renderPass;
     VkDescriptorSetLayout descriptorSetLayout;
-    VkPipelineLayout pipelineLayout;
+    VkPipelineLayout pipelineLayoutFill;
+    VkPipelineLayout pipelineLayoutLine;
     VkPipeline graphicsPipelineFill;
     VkPipeline graphicsPipelineLine;
 
@@ -258,8 +263,8 @@ private:
         createImageViews();
         createRenderPass();
         createDescriptorSetLayout();
-        createGraphicsPipeline(&graphicsPipelineFill, false);
-        createGraphicsPipeline(&graphicsPipelineLine, true);
+        createGraphicsPipeline(&graphicsPipelineFill, &pipelineLayoutFill, false);
+        createGraphicsPipeline(&graphicsPipelineLine, &pipelineLayoutLine, true);
         createFramebuffers();
         createCommandPool();
         createVertexBuffer();
@@ -273,6 +278,7 @@ private:
 
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
+
             glfwPollEvents();
             drawFrame();
         }
@@ -288,7 +294,8 @@ private:
         vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
         vkDestroyPipeline(device, graphicsPipelineFill, nullptr);
         vkDestroyPipeline(device, graphicsPipelineLine, nullptr);
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyPipelineLayout(device, pipelineLayoutFill, nullptr);
+        vkDestroyPipelineLayout(device, pipelineLayoutLine, nullptr);
         vkDestroyRenderPass(device, renderPass, nullptr);
 
         for (auto imageView : swapChainImageViews) {
@@ -353,8 +360,8 @@ private:
         createSwapChain();
         createImageViews();
         createRenderPass();
-        createGraphicsPipeline(&graphicsPipelineFill, false);
-        createGraphicsPipeline(&graphicsPipelineLine, true);
+        createGraphicsPipeline(&graphicsPipelineFill, &pipelineLayoutFill, false);
+        createGraphicsPipeline(&graphicsPipelineLine,&pipelineLayoutLine, true);
         createFramebuffers();
         createUniformBuffers();
         createDescriptorPool();
@@ -635,7 +642,7 @@ private:
         }
     }
 
-    void createGraphicsPipeline(VkPipeline* pipeline, bool wireframe) {
+    void createGraphicsPipeline(VkPipeline* pipeline, VkPipelineLayout* pipelineLayout,bool wireframe) {
         auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
         auto tescShaderCode = readFile("shaders/tesc.spv");
@@ -754,7 +761,7 @@ private:
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
 
-        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
         }
 
@@ -769,7 +776,7 @@ private:
         pipelineInfo.pMultisampleState = &multisampling;
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pTessellationState = &pipelineTessellationStateCreateInfo;
-        pipelineInfo.layout = pipelineLayout;
+        pipelineInfo.layout = *pipelineLayout;
         pipelineInfo.renderPass = renderPass;
         pipelineInfo.subpass = 0;
         pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
@@ -1032,7 +1039,7 @@ private:
 
             vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
-            vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _wireframe ? pipelineLayoutLine : pipelineLayoutFill, 0, 1, &descriptorSets[i], 0, nullptr);
 
             vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
@@ -1070,9 +1077,20 @@ private:
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
-
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+        //fps calculation
+        double delta = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
+        ++frames;
+        if (delta >= 1)
+        {
+            lastTime = currentTime;
+            std::ostringstream ss;
+            ss << "FPS: " << frames;
+            frames = 0;
+            glfwSetWindowTitle(window, ss.str().c_str());
+        }
+    	
         	
     	UniformBufferObject ubo{};
         ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
